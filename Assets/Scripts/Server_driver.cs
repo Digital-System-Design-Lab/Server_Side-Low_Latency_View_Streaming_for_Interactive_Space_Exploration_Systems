@@ -117,9 +117,9 @@ public class Server_driver : MonoBehaviour
     void Start()
     {
         Application.runInBackground = true;
-        EstablishConn();
-        receiveClientInfo();
-        init_Server();
+        EstablishConn();                    //클라이언트와의 연결
+        receiveClientInfo();                //클라이언트로부터 sub-segment size 정보 수신
+        init_Server();                      //클래스 초기화
         recvSW = new Stopwatch();
         loadSW = new Stopwatch();
     }
@@ -127,353 +127,26 @@ public class Server_driver : MonoBehaviour
     // Update is called once per frame
     void Update()
     {
+        // 만약 client가 끊긴다면 종료
         if(tcpclient.Connected == false || tcpclient.Available == 1)
         {
             UnityEngine.Debug.Log("Disconnected");
             EditorApplication.isPlaying = false;
         }
         #region Receive a reqeust from client
-        ReceivePacket();
-        TransP2L();
-        #endregion
-
-        #region Response Time
+        ReceivePacket();                    //클라이언트로부터 request packet 수신
+        TransP2L();                         //수신받은 packet은 가상공간 좌표로 변환
         #endregion
 
         sendTask = new Thread(()=>
         {
-            loadandSendSubSeg(cur_loc);
+            loadandSendSubSeg(cur_loc);     //Sub-segment 요청이 들어왔다면 background로 클라이언트에게 전송
         });
         sendTask.Start();
-
-        //UnityEngine.Debug.Log(sync + " 완료");
-        if (time == 11040/seg_size)
-        {
-            EditorApplication.isPlaying = false;
-        }
         time++;
-        
     }
 
-    void Response(int isPredicted)
-    {
-        int delay = 3;
-        System.Random rand = new System.Random();
-        if (isPredicted == 0)
-        {
-            //prediction 성공
-            delay += rand.Next(-1, 1);
-        }
-        else
-        {
-            delay = delay * 30 + rand.Next(-1, 1);
-        }
-        UnityEngine.Debug.LogWarningFormat("Response time : {0}", delay);
-        //Thread.Sleep(delay);
-        dodelay(delay);
-    }
-
-    public void dodelay(int target_delay)
-    {
-        DateTime temp = DateTime.Now;
-        float excution_time = 0.0f;
-        while (target_delay > excution_time)
-        {
-            excution_time = (DateTime.Now - temp).Milliseconds;
-        }
-    }
-
-    void receiveClientInfo()
-    {
-        int clientinfoSize = readPosByteSize(messageByteLength);
-        readClientInfo(clientinfoSize);
-    }
-    void init_Server()
-    {
-        server = new Server();
-        myVR = new NS_5DoFVR();
-        myVR.parsing_data();
-        seg_size = client_info.sub_segment_size;
-        buffer = new server_buffer(seg_size);
-        range = calcSubrange(seg_size);
-        prev_seg_x = -1;
-        prev_seg_y = -1;
-    }
-    public bool _isSameSeg()
-    {
-        if ((prev_seg_x == cur_loc.get_seg_pos().seg_pos_x) && (prev_seg_y == cur_loc.get_seg_pos().seg_pos_y))
-        {
-            return true;
-        }
-        else
-        {
-            prev_seg_x = cur_loc.get_seg_pos().seg_pos_x;
-            prev_seg_y = cur_loc.get_seg_pos().seg_pos_y;
-
-            return false;
-        }
-    }
-    void load_view(Loc loc)
-    {
-        int iter = 0;
-        if (loc.getPath().Substring(0, 1).Equals("C"))
-        {
-            iter = loc.getPos_y();
-        }
-        else
-        {
-            iter = loc.getPos_x();
-        }
-        viewtemp = File.ReadAllBytes(setdirectory(iter, loc.getPath()));
-    }
-    void load_view(Loc loc, Qualitylist misslist)
-    {
-        int iter = 0;
-        if (loc.getPath().Substring(0, 1).Equals("C"))
-        {
-            iter = loc.getPos_y();
-        }
-        else
-        {
-            iter = loc.getPos_x();
-        }
-
-        setdirectory(iter, loc.getPath(), 0, misslist.Left);
-        setdirectory(iter, loc.getPath(), 1, misslist.Front);
-        setdirectory(iter, loc.getPath(), 2, misslist.Right);
-        setdirectory(iter, loc.getPath(), 3, misslist.Back);
-    }
-
-    void load_view(Loc loc, Qualitylist misslist, int iter, int start)
-    {
-        if (misslist.Left != QUALITY.EMPTY) buffer.setlview(File.ReadAllBytes(setdirectory(iter, loc.getPath(), 0, misslist.Left)), (iter-start));
-        if (misslist.Front != QUALITY.EMPTY) buffer.setfview(File.ReadAllBytes(setdirectory(iter, loc.getPath(), 1, misslist.Front)), (iter - start));
-        if (misslist.Right != QUALITY.EMPTY) buffer.setrview(File.ReadAllBytes(setdirectory(iter, loc.getPath(), 2, misslist.Right)), (iter - start));
-        if (misslist.Back != QUALITY.EMPTY) buffer.setbview(File.ReadAllBytes(setdirectory(iter, loc.getPath(), 3, misslist.Back)), (iter - start));
-    }
-
-    void send_view()
-    {
-        frameBytesLength = new byte[messageByteLength];
-        byteLengthToFrameByteArray(viewtemp.Length, frameBytesLength);
-        stream.Write(frameBytesLength, 0, frameBytesLength.Length);
-        stream.Write(viewtemp, 0, viewtemp.Length);
-    }
-
-    public void loadSubSeg(Loc cur_loc)
-    {
-        string region = cur_loc.getPath();
-        int start = -1; int end = -1;
-        if (region.Substring(0, 1).Equals("R"))
-        {
-            start = cur_loc.get_seg_pos().start_x;
-            end = cur_loc.get_seg_pos().end_x;
-        }
-        else if (region.Substring(0, 1).Equals("C"))
-        {
-            start = cur_loc.get_seg_pos().start_y;
-            end = cur_loc.get_seg_pos().end_y;
-        }
-
-        for (int i = start; i <= end; i++)
-        {
-            //Task load_task = Task.Run(() =>
-            //{
-            //    load_view(container, packet.result_cache.getMisslist(), i, 10.0f, region);
-            //});
-            //UnityEngine.Debug.LogWarningFormat("load view num {0}", i);
-            //UnityEngine.Debug.LogWarningFormat("misslist : {0}", packet.result_cache.getMisslist());
-            load_view(cur_loc, packet.misslist, i, start);
-        }
-        //08.17 오늘은 여기까지...
-    }
-
-    public void loadandSendSubSeg(Loc cur_loc)
-    {
-        string region = cur_loc.getPath();
-        int start = -1; int end = -1;
-        if (region.Substring(0, 1).Equals("R"))
-        {
-            start = cur_loc.get_seg_pos().start_x;
-            end = cur_loc.get_seg_pos().end_x;
-        }
-        else if (region.Substring(0, 1).Equals("C"))
-        {
-            start = cur_loc.get_seg_pos().start_y;
-            end = cur_loc.get_seg_pos().end_y;
-        }
-
-        bool reverse = false;
-        if(cur_loc.iter == 0)
-        {
-            reverse = false;
-        }
-        else if(cur_loc.iter == seg_size-1)
-        {
-            reverse = true;
-        }
-        int isPredicted = packet.isPredicted;
-        if (!reverse)
-        {
-
-            for (int i = start; i <= end; i++)
-            {
-                DateTime temp = DateTime.Now;
-                Response(isPredicted);
-                load_view(cur_loc, packet.misslist, i, start);
-                sendView(packet.misslist, (i - start));
-                UnityEngine.Debug.LogFormat("Sending view delay : {0:f3}", (DateTime.Now - temp).TotalMilliseconds);
-
-            }
-        }
-        else
-        {
-            for (int i = end; i >= start; i--)
-            {
-                DateTime temp = DateTime.Now;
-                Response(isPredicted);
-                load_view(cur_loc, packet.misslist, i, start);
-                sendView(packet.misslist, (i - start));
-                UnityEngine.Debug.LogFormat("Sending view delay : {0:f3}", (DateTime.Now - temp).TotalMilliseconds);
-
-            }
-        }
-        
-        
-        //08.17 오늘은 여기까지...
-    }
-
-    void Sending_viewsize(int viewlength)
-    {
-        frameBytesLength = new byte[messageByteLength];
-        byteLengthToFrameByteArray(viewlength, frameBytesLength);
-        tcpclient.SendBufferSize = frameBytesLength.Length;
-        tcpclient.NoDelay = true;
-        tcpclient.Client.NoDelay = true;
-        NetworkStream tex_stream = tcpclient.GetStream();
-        tex_stream.Write(frameBytesLength, 0, frameBytesLength.Length);
-    }
-    void Sending_view(byte[] view)
-    {
-        tcpclient.SendBufferSize = view.Length;
-        tcpclient.NoDelay = true;
-        tcpclient.Client.NoDelay = true;
-        NetworkStream tex_stream = tcpclient.GetStream();
-        tex_stream.Write(view, 0, view.Length);
-    }
-
-    void sendSubSeg(Qualitylist misslist)
-    {
-        for (int i = 0; i < buffer.seg_size; i++)
-        {
-            Sending_viewsize(i);
-            if (misslist.Left != QUALITY.EMPTY)
-            {
-                Sending_viewsize(buffer.getlview(i).Length);
-                Sending_view(buffer.getlview(i));
-            }
-            if (misslist.Front != QUALITY.EMPTY)
-            {
-                Sending_viewsize(buffer.getfview(i).Length);
-                Sending_view(buffer.getfview(i));
-            }
-            if (misslist.Right != QUALITY.EMPTY)
-            {
-                Sending_viewsize(buffer.getrview(i).Length);
-                Sending_view(buffer.getrview(i));
-            }
-            if (misslist.Back != QUALITY.EMPTY)
-            {
-                Sending_viewsize(buffer.getbview(i).Length);
-                Sending_view(buffer.getbview(i));
-            }
-        }
-    }
-
-    void sendView(Qualitylist misslist, int i)
-    {
-        Sending_viewsize(i);
-        if (misslist.Left != QUALITY.EMPTY)
-        {
-            Sending_viewsize(buffer.getlview(i).Length);
-            Sending_view(buffer.getlview(i));
-        }
-        if (misslist.Front != QUALITY.EMPTY)
-        {
-            Sending_viewsize(buffer.getfview(i).Length);
-            Sending_view(buffer.getfview(i));
-        }
-        if (misslist.Right != QUALITY.EMPTY)
-        {
-            Sending_viewsize(buffer.getrview(i).Length);
-            Sending_view(buffer.getrview(i));
-        }
-        if (misslist.Back != QUALITY.EMPTY)
-        {
-            Sending_viewsize(buffer.getbview(i).Length);
-            Sending_view(buffer.getbview(i));
-        }
-    }
-
-    void send_views(Qualitylist misslist)
-    {
-        if (misslist.Left != QUALITY.EMPTY)
-        {
-            frameBytesLength = new byte[messageByteLength];
-            byteLengthToFrameByteArray(Lsubview.Length, frameBytesLength);
-            tcpclient.SendBufferSize = frameBytesLength.Length;
-            tcpclient.NoDelay = true;
-            NetworkStream tex_stream = tcpclient.GetStream();
-            tex_stream.Write(frameBytesLength, 0, frameBytesLength.Length);
-            tcpclient.SendBufferSize = 65536;
-            tcpclient.NoDelay = true;
-            NetworkStream tex_stream1 = tcpclient.GetStream();
-            tex_stream1.Write(Lsubview, 0, Lsubview.Length);
-        }
-        if (misslist.Front != QUALITY.EMPTY)
-        {
-            frameBytesLength = new byte[messageByteLength];
-            byteLengthToFrameByteArray(Fsubview.Length, frameBytesLength);
-            tcpclient.SendBufferSize = frameBytesLength.Length;
-            tcpclient.NoDelay = true;
-            NetworkStream tex_stream = tcpclient.GetStream();
-            tex_stream.Write(frameBytesLength, 0, frameBytesLength.Length);
-            tcpclient.SendBufferSize = 65536;
-            tcpclient.NoDelay = true;
-            NetworkStream tex_stream1 = tcpclient.GetStream();
-            tex_stream1.Write(Fsubview, 0, Fsubview.Length);
-        }
-        if (misslist.Right != QUALITY.EMPTY)
-        {
-            frameBytesLength = new byte[messageByteLength];
-            byteLengthToFrameByteArray(Rsubview.Length, frameBytesLength);
-            tcpclient.SendBufferSize = frameBytesLength.Length;
-            tcpclient.NoDelay = true;
-            NetworkStream tex_stream = tcpclient.GetStream();
-            tex_stream.Write(frameBytesLength, 0, frameBytesLength.Length);
-            tcpclient.SendBufferSize = 65536;
-            tcpclient.NoDelay = true;
-            NetworkStream tex_stream1 = tcpclient.GetStream();
-            tex_stream1.Write(Rsubview, 0, Rsubview.Length);
-        }
-        if (misslist.Back != QUALITY.EMPTY)
-        {
-            frameBytesLength = new byte[messageByteLength];
-            byteLengthToFrameByteArray(Bsubview.Length, frameBytesLength);
-            tcpclient.SendBufferSize = frameBytesLength.Length;
-            tcpclient.NoDelay = true;
-            NetworkStream tex_stream = tcpclient.GetStream();
-            tex_stream.Write(frameBytesLength, 0, frameBytesLength.Length);
-            tcpclient.SendBufferSize = 65536;
-            tcpclient.NoDelay = true;
-            NetworkStream tex_stream1 = tcpclient.GetStream();
-            tex_stream1.Write(Bsubview, 0, Bsubview.Length);
-        }
-    }
-    void displayPos()
-    {
-        UnityEngine.Debug.LogFormat("Current position : {0},{1}", packet.pos.getX(), packet.pos.getY());
-    }
+    #region 기타 methods
     public void TransP2L()
     {
         myVR.classify_Location(packet.pos.getX(), packet.pos.getY());
@@ -520,19 +193,62 @@ public class Server_driver : MonoBehaviour
         }
         return subrange;
     }
-    public string setdirectory(int pos_x, string region)
+    void receiveClientInfo()
     {
-        string dir = "";
-        if (pos_x < 9)
-            dir = "C:\\LFDATA\\EVEN\\" + region + "\\" + "000" + (pos_x + 1).ToString() + ".jpg";
-        else if (pos_x < 99)
-            dir = "C:\\LFDATA\\EVEN\\" + region + "\\" + "00" + (pos_x + 1).ToString() + ".jpg";
-        else if (pos_x < 999)
-            dir = "C:\\LFDATA\\EVEN\\" + region + "\\" + "0" + (pos_x + 1).ToString() + ".jpg";
-        UnityEngine.Debug.Log(dir);
-        return dir;
+        int clientinfoSize = readPosByteSize(messageByteLength);
+        readClientInfo(clientinfoSize);
     }
+    /// <summary>
+    /// Dead Reckoning의 경우 예측이 실패했을 때 서버 응답시간에 패널티를 부여
+    /// prediction이 없을 때 2~3ms, prediction 실패의 경우 +30ms
+    /// </summary>
+    /// <param name="isPredicted">Prediction 성공 여부</param>
+    void Response(int isPredicted)
+    {
+        int delay = 3;
+        System.Random rand = new System.Random();
+        if (isPredicted == 0)
+        {
+            //prediction 성공
+            delay += rand.Next(-1, 1);
+        }
+        else
+        {
+            delay = delay * 30 + rand.Next(-1, 1);
+        }
+        UnityEngine.Debug.LogWarningFormat("Response time : {0}", delay);
+        dodelay(delay);
+    }
+    public void dodelay(int target_delay)
+    {
+        DateTime temp = DateTime.Now;
+        float excution_time = 0.0f;
+        while (target_delay > excution_time)
+        {
+            excution_time = (DateTime.Now - temp).Milliseconds;
+        }
+    }
+    void init_Server()
+    {
+        server = new Server();
+        myVR = new NS_5DoFVR();
+        myVR.parsing_data();
+        seg_size = client_info.sub_segment_size;
+        buffer = new server_buffer(seg_size);
+        range = calcSubrange(seg_size);
+        prev_seg_x = -1;
+        prev_seg_y = -1;
+    }
+    #endregion
 
+    #region Disk functions
+    void load_view(Loc loc, Qualitylist misslist, int iter, int start)
+    {
+        if (misslist.Left != QUALITY.EMPTY) buffer.setlview(File.ReadAllBytes(setdirectory(iter, loc.getPath(), 0, misslist.Left)), (iter - start));
+        if (misslist.Front != QUALITY.EMPTY) buffer.setfview(File.ReadAllBytes(setdirectory(iter, loc.getPath(), 1, misslist.Front)), (iter - start));
+        if (misslist.Right != QUALITY.EMPTY) buffer.setrview(File.ReadAllBytes(setdirectory(iter, loc.getPath(), 2, misslist.Right)), (iter - start));
+        if (misslist.Back != QUALITY.EMPTY) buffer.setbview(File.ReadAllBytes(setdirectory(iter, loc.getPath(), 3, misslist.Back)), (iter - start));
+    }
     public string setdirectory(int pos_x, string region, int direction, QUALITY digit)
     {
         string[] ori = { "LEFT", "FRONT", "RIGHT", "BACK" };
@@ -558,32 +274,109 @@ public class Server_driver : MonoBehaviour
         //buffer = File.ReadAllBytes(dir);\
         return dir;
     }
-    void ReceiveSync()
-    {
-        sync = readPosByteSize(messageByteLength);
+    #endregion
 
+    #region Network functions
+    public void loadandSendSubSeg(Loc cur_loc)
+    {
+        string region = cur_loc.getPath();
+        int start = -1; int end = -1;
+        if (region.Substring(0, 1).Equals("R"))
+        {
+            start = cur_loc.get_seg_pos().start_x;
+            end = cur_loc.get_seg_pos().end_x;
+        }
+        else if (region.Substring(0, 1).Equals("C"))
+        {
+            start = cur_loc.get_seg_pos().start_y;
+            end = cur_loc.get_seg_pos().end_y;
+        }
+
+        bool reverse = false;
+        if (cur_loc.iter == 0)
+        {
+            reverse = false;
+        }
+        else if (cur_loc.iter == seg_size - 1)
+        {
+            reverse = true;
+        }
+        int isPredicted = packet.isPredicted;
+        if (!reverse)
+        {
+            for (int i = start; i <= end; i++)
+            {
+                DateTime temp = DateTime.Now;
+                Response(isPredicted);                          //Dead Reckoning 일 경우 prediction 실패시 서버 응답시간에 패널티 부여
+                load_view(cur_loc, packet.misslist, i, start);  //misslist에 따른 sub-view를 disk로부터 load
+                sendView(packet.misslist, (i - start));         //클라이언트에게 packet으로 sub-view 전송
+                UnityEngine.Debug.LogFormat("Sending view delay : {0:f3}", (DateTime.Now - temp).TotalMilliseconds);
+            }
+        }
+        else
+        {
+            for (int i = end; i >= start; i--)
+            {
+                DateTime temp = DateTime.Now;
+                Response(isPredicted);
+                load_view(cur_loc, packet.misslist, i, start);
+                sendView(packet.misslist, (i - start));
+                UnityEngine.Debug.LogFormat("Sending view delay : {0:f3}", (DateTime.Now - temp).TotalMilliseconds);
+
+            }
+        }
     }
-    void SendSync()
+
+    void Sending_viewsize(int viewlength)
     {
         frameBytesLength = new byte[messageByteLength];
-        byteLengthToFrameByteArray(1, frameBytesLength);
-        stream.Write(frameBytesLength, 0, frameBytesLength.Length);
+        byteLengthToFrameByteArray(viewlength, frameBytesLength);
+        tcpclient.SendBufferSize = frameBytesLength.Length;
+        tcpclient.NoDelay = true;
+        tcpclient.Client.NoDelay = true;
+        NetworkStream tex_stream = tcpclient.GetStream();
+        tex_stream.Write(frameBytesLength, 0, frameBytesLength.Length);
+    }
+    void Sending_view(byte[] view)
+    {
+        tcpclient.SendBufferSize = view.Length;
+        tcpclient.NoDelay = true;
+        tcpclient.Client.NoDelay = true;
+        NetworkStream tex_stream = tcpclient.GetStream();
+        tex_stream.Write(view, 0, view.Length);
+    }
+
+    void sendView(Qualitylist misslist, int i)
+    {
+        Sending_viewsize(i);
+        if (misslist.Left != QUALITY.EMPTY)
+        {
+            Sending_viewsize(buffer.getlview(i).Length);
+            Sending_view(buffer.getlview(i));
+        }
+        if (misslist.Front != QUALITY.EMPTY)
+        {
+            Sending_viewsize(buffer.getfview(i).Length);
+            Sending_view(buffer.getfview(i));
+        }
+        if (misslist.Right != QUALITY.EMPTY)
+        {
+            Sending_viewsize(buffer.getrview(i).Length);
+            Sending_view(buffer.getrview(i));
+        }
+        if (misslist.Back != QUALITY.EMPTY)
+        {
+            Sending_viewsize(buffer.getbview(i).Length);
+            Sending_view(buffer.getbview(i));
+        }
     }
     void ReceivePacket()
     {
         int PosDataSize = readPosByteSize(messageByteLength);
-        if(PosDataSize == 100)
-        {
-            EditorApplication.isPlaying = false;
-        }
         readFrameByteArray(PosDataSize);
     }
-
-
-    #region Network functions
     void EstablishConn()
     {
-#if true
         tcpserver = new TcpListener(IPAddress.Any, Port);
         tcpserver.Start();
         Task serverThread = new Task(() =>
@@ -595,37 +388,11 @@ public class Server_driver : MonoBehaviour
         });
         serverThread.Start();
         serverThread.Wait();
-#else
-        #region Postional data connection
-        posClient = new TcpClient();
-        posClient.Connect(IPAddress.Parse(Pos_client_IP), Pos_port);
-        pos_stream = posClient.GetStream();
-        UnityEngine.Debug.Log("Ready for receiving pos data");
-        #endregion
-
-        Thread.Sleep(1000);
-
-        #region view data connection
-        textureServer = new TcpListener(IPAddress.Any, Texture_port);
-        textureServer.Start();
-        Task serverThread = new Task(() =>
-        {
-            UnityEngine.Debug.Log("Wait for sending texture data");
-            texClient = textureServer.AcceptTcpClient();
-            UnityEngine.Debug.Log("Ready for sending texture data");
-            tex_stream = texClient.GetStream();
-        });
-        serverThread.Start();
-        #endregion
-#endif
-
-
     }
 
     private void readClientInfo(int size)
     {
         bool disconnected = false;
-
         byte[] clientinfo = new byte[size];
         tcpclient.ReceiveBufferSize = size;
         tcpclient.NoDelay = true;
