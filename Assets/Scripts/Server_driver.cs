@@ -21,43 +21,12 @@ using System.Diagnostics;
 public class Server_driver : MonoBehaviour
 {
     #region Network variables
-
-#if false
-    private string Pos_client_IP = "165.246.39.163";
-    //private string Pos_client_IP = "192.168.0.1";
-    //private string Pos_client_IP = "52.231.160.57"; // 11.12 연세대 5g 실험
-    //private string Pos_client_IP = "116.34.184.61";
-    private int Pos_port = 12000;
-    //private int Pos_port = 50000;
-    private string Texture_server_IP = "192.168.0.1";
-    private int Texture_port = 11000;
-#endif
-
-    int BANDWIDTH = 50;
-
-    int Mega = 1000000;
-
-    
-
     [Header("Must be the same in sender and receiver")]
     public int messageByteLength = 24;
-
-#if true
     TcpListener tcpserver = null;
     TcpClient tcpclient = null;
     NetworkStream stream = null;
     private int Port = 11000;
-#else
-    TcpClient posClient = null;
-    TcpClient texClient = null;
-    TcpListener textureServer = null;
-
-    NetworkStream pos_stream = null;
-    NetworkStream tex_stream = null;
-#endif
-
-
-
 
     DataPacket receivePacket;
     DataPacket tempPacket;
