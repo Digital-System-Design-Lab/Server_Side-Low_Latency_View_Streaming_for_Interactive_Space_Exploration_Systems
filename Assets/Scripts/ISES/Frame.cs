@@ -5,6 +5,6 @@ public class Frame : MonoBehaviour
 {
     void Awake()
     {
-        //Application.targetFrameRate = 10;
+        Application.targetFrameRate = 100;
     }
 }

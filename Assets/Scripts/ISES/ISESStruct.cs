@@ -141,12 +141,14 @@ namespace ISESStructure
         public Pos pos;
         public Qualitylist misslist; // from client
         public sub_segment_pos sub_seg_info;
+        public int isPredicted;
 
-        public Request(Pos pos, Qualitylist misslist, sub_segment_pos sub_seg_info)
+        public Request(Pos pos, Qualitylist misslist, sub_segment_pos sub_seg_info, int isPredicted)
         {
             this.pos = pos;
             this.misslist = misslist;
             this.sub_seg_info = sub_seg_info;
+            this.isPredicted = isPredicted;
         }
 
         public byte[] StructToBytes(object obj)
@@ -543,7 +545,7 @@ namespace ISESStructure
                 seg_pos_x = (cur_x / seg_size) + (origin_x % seg_size);
                 seg_pos_y = ((cur_y - origin_y) / seg_size) + 1 + ((origin_y/seg_size)+(origin_y/121));
             }
-            UnityEngine.Debug.LogWarningFormat("Current pos : {4} {5} segment pos : {0}, {1} start pos : {2}, {3}", seg_pos_x, seg_pos_y, start_x, start_y, cur_x, cur_y);
+            //UnityEngine.Debug.LogWarningFormat("Current pos : {4} {5} segment pos : {0}, {1} start pos : {2}, {3}", seg_pos_x, seg_pos_y, start_x, start_y, cur_x, cur_y);
 
         }
         public override string ToString()

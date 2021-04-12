@@ -16,31 +16,48 @@ using ISESServer;
 using _NS_5DoFVR;
 using ISESESAS;
 using Born2Code.Net;
+using System.Diagnostics;
 
 public class Server_driver : MonoBehaviour
 {
     #region Network variables
-    //private string Pos_client_IP = "165.246.39.163";
-    private string Pos_client_IP = "192.168.0.3";
+
+#if false
+    private string Pos_client_IP = "165.246.39.163";
+    //private string Pos_client_IP = "192.168.0.1";
+    //private string Pos_client_IP = "52.231.160.57"; // 11.12 연세대 5g 실험
     //private string Pos_client_IP = "116.34.184.61";
     private int Pos_port = 12000;
+    //private int Pos_port = 50000;
+    private string Texture_server_IP = "192.168.0.1";
+    private int Texture_port = 11000;
+#endif
 
     int BANDWIDTH = 50;
 
     int Mega = 1000000;
 
-    private string Texture_server_IP = "192.168.0.64";
-    private int Texture_port = 11000;
+    
 
     [Header("Must be the same in sender and receiver")]
     public int messageByteLength = 24;
 
+#if true
+    TcpListener tcpserver = null;
+    TcpClient tcpclient = null;
+    NetworkStream stream = null;
+    private int Port = 11000;
+#else
     TcpClient posClient = null;
     TcpClient texClient = null;
     TcpListener textureServer = null;
 
     NetworkStream pos_stream = null;
     NetworkStream tex_stream = null;
+#endif
+
+
+
 
     DataPacket receivePacket;
     DataPacket tempPacket;
@@ -62,6 +79,8 @@ public class Server_driver : MonoBehaviour
     int sync = 0;
     int prev_seg_x;
     int prev_seg_y;
+
+    sub_segment_pos seg_pos;
     #endregion
 
     #region 클래스 변수
@@ -74,6 +93,11 @@ public class Server_driver : MonoBehaviour
     int seg_size;
     #endregion
 
+    #region MesurementExecutionTime
+    Stopwatch recvSW;
+    Stopwatch loadSW;
+    int sumOfBufferWrite=0;
+    #endregion
 
     #region byte변수
     byte[] Lsubview;
@@ -86,39 +110,77 @@ public class Server_driver : MonoBehaviour
     #endregion
 
     #region Task 변수
-    Task sendTask;
+    Thread sendTask;
     #endregion
 
     // Start is called before the first frame update
     void Start()
     {
+        Application.runInBackground = true;
         EstablishConn();
-        //receiveClientInfo();
-        //init_Server();
+        receiveClientInfo();
+        init_Server();
+        recvSW = new Stopwatch();
+        loadSW = new Stopwatch();
     }
 
     // Update is called once per frame
     void Update()
     {
-        /*
+        if(tcpclient.Connected == false || tcpclient.Available == 1)
+        {
+            UnityEngine.Debug.Log("Disconnected");
+            EditorApplication.isPlaying = false;
+        }
         #region Receive a reqeust from client
         ReceivePacket();
-        cur_loc = TransP2L();
+        TransP2L();
         #endregion
-        
-        sendTask = new Task(()=>
+
+        #region Response Time
+        #endregion
+
+        sendTask = new Thread(()=>
         {
             loadandSendSubSeg(cur_loc);
         });
         sendTask.Start();
-        
-        UnityEngine.Debug.Log(sync + " 완료");
+
+        //UnityEngine.Debug.Log(sync + " 완료");
         if (time == 11040/seg_size)
         {
             EditorApplication.isPlaying = false;
         }
         time++;
-        */
+        
+    }
+
+    void Response(int isPredicted)
+    {
+        int delay = 3;
+        System.Random rand = new System.Random();
+        if (isPredicted == 0)
+        {
+            //prediction 성공
+            delay += rand.Next(-1, 1);
+        }
+        else
+        {
+            delay = delay * 30 + rand.Next(-1, 1);
+        }
+        UnityEngine.Debug.LogWarningFormat("Response time : {0}", delay);
+        //Thread.Sleep(delay);
+        dodelay(delay);
+    }
+
+    public void dodelay(int target_delay)
+    {
+        DateTime temp = DateTime.Now;
+        float excution_time = 0.0f;
+        while (target_delay > excution_time)
+        {
+            excution_time = (DateTime.Now - temp).Milliseconds;
+        }
     }
 
     void receiveClientInfo()
@@ -176,26 +238,26 @@ public class Server_driver : MonoBehaviour
             iter = loc.getPos_x();
         }
 
-        setdirectory(ref Lsubview, iter, loc.getPath(), 0, misslist.Left);
-        setdirectory(ref Fsubview, iter, loc.getPath(), 1, misslist.Front);
-        setdirectory(ref Rsubview, iter, loc.getPath(), 2, misslist.Right);
-        setdirectory(ref Bsubview, iter, loc.getPath(), 3, misslist.Back);
+        setdirectory(iter, loc.getPath(), 0, misslist.Left);
+        setdirectory(iter, loc.getPath(), 1, misslist.Front);
+        setdirectory(iter, loc.getPath(), 2, misslist.Right);
+        setdirectory(iter, loc.getPath(), 3, misslist.Back);
     }
 
     void load_view(Loc loc, Qualitylist misslist, int iter, int start)
     {
-        if (misslist.Left != QUALITY.EMPTY) buffer.setlview(File.ReadAllBytes(setdirectory(ref Lsubview, iter, loc.getPath(), 0, misslist.Left)), (iter-start));
-        if (misslist.Front != QUALITY.EMPTY) buffer.setfview(File.ReadAllBytes(setdirectory(ref Fsubview, iter, loc.getPath(), 1, misslist.Front)), (iter - start));
-        if (misslist.Right != QUALITY.EMPTY) buffer.setrview(File.ReadAllBytes(setdirectory(ref Rsubview, iter, loc.getPath(), 2, misslist.Right)), (iter - start));
-        if (misslist.Back != QUALITY.EMPTY) buffer.setbview(File.ReadAllBytes(setdirectory(ref Bsubview, iter, loc.getPath(), 3, misslist.Back)), (iter - start));
+        if (misslist.Left != QUALITY.EMPTY) buffer.setlview(File.ReadAllBytes(setdirectory(iter, loc.getPath(), 0, misslist.Left)), (iter-start));
+        if (misslist.Front != QUALITY.EMPTY) buffer.setfview(File.ReadAllBytes(setdirectory(iter, loc.getPath(), 1, misslist.Front)), (iter - start));
+        if (misslist.Right != QUALITY.EMPTY) buffer.setrview(File.ReadAllBytes(setdirectory(iter, loc.getPath(), 2, misslist.Right)), (iter - start));
+        if (misslist.Back != QUALITY.EMPTY) buffer.setbview(File.ReadAllBytes(setdirectory(iter, loc.getPath(), 3, misslist.Back)), (iter - start));
     }
 
     void send_view()
     {
         frameBytesLength = new byte[messageByteLength];
         byteLengthToFrameByteArray(viewtemp.Length, frameBytesLength);
-        tex_stream.Write(frameBytesLength, 0, frameBytesLength.Length);
-        tex_stream.Write(viewtemp, 0, viewtemp.Length);
+        stream.Write(frameBytesLength, 0, frameBytesLength.Length);
+        stream.Write(viewtemp, 0, viewtemp.Length);
     }
 
     public void loadSubSeg(Loc cur_loc)
@@ -250,22 +312,30 @@ public class Server_driver : MonoBehaviour
         {
             reverse = true;
         }
-
+        int isPredicted = packet.isPredicted;
         if (!reverse)
         {
+
             for (int i = start; i <= end; i++)
             {
+                DateTime temp = DateTime.Now;
+                Response(isPredicted);
                 load_view(cur_loc, packet.misslist, i, start);
                 sendView(packet.misslist, (i - start));
+                UnityEngine.Debug.LogFormat("Sending view delay : {0:f3}", (DateTime.Now - temp).TotalMilliseconds);
+
             }
         }
         else
         {
             for (int i = end; i >= start; i--)
             {
+                DateTime temp = DateTime.Now;
+                Response(isPredicted);
                 load_view(cur_loc, packet.misslist, i, start);
                 sendView(packet.misslist, (i - start));
-                //Thread.Sleep(4);
+                UnityEngine.Debug.LogFormat("Sending view delay : {0:f3}", (DateTime.Now - temp).TotalMilliseconds);
+
             }
         }
         
@@ -277,18 +347,21 @@ public class Server_driver : MonoBehaviour
     {
         frameBytesLength = new byte[messageByteLength];
         byteLengthToFrameByteArray(viewlength, frameBytesLength);
-        texClient.SendBufferSize = frameBytesLength.Length;
-        texClient.NoDelay = true;
-        NetworkStream tex_stream = texClient.GetStream();
+        tcpclient.SendBufferSize = frameBytesLength.Length;
+        tcpclient.NoDelay = true;
+        tcpclient.Client.NoDelay = true;
+        NetworkStream tex_stream = tcpclient.GetStream();
         tex_stream.Write(frameBytesLength, 0, frameBytesLength.Length);
     }
     void Sending_view(byte[] view)
     {
-        texClient.SendBufferSize = view.Length;
-        texClient.NoDelay = true;
-        NetworkStream tex_stream = texClient.GetStream();
+        tcpclient.SendBufferSize = view.Length;
+        tcpclient.NoDelay = true;
+        tcpclient.Client.NoDelay = true;
+        NetworkStream tex_stream = tcpclient.GetStream();
         tex_stream.Write(view, 0, view.Length);
     }
+
     void sendSubSeg(Qualitylist misslist)
     {
         for (int i = 0; i < buffer.seg_size; i++)
@@ -348,52 +421,52 @@ public class Server_driver : MonoBehaviour
         {
             frameBytesLength = new byte[messageByteLength];
             byteLengthToFrameByteArray(Lsubview.Length, frameBytesLength);
-            texClient.SendBufferSize = frameBytesLength.Length;
-            texClient.NoDelay = true;
-            NetworkStream tex_stream = texClient.GetStream();
+            tcpclient.SendBufferSize = frameBytesLength.Length;
+            tcpclient.NoDelay = true;
+            NetworkStream tex_stream = tcpclient.GetStream();
             tex_stream.Write(frameBytesLength, 0, frameBytesLength.Length);
-            texClient.SendBufferSize = 65536;
-            texClient.NoDelay = true;
-            NetworkStream tex_stream1 = texClient.GetStream();
+            tcpclient.SendBufferSize = 65536;
+            tcpclient.NoDelay = true;
+            NetworkStream tex_stream1 = tcpclient.GetStream();
             tex_stream1.Write(Lsubview, 0, Lsubview.Length);
         }
         if (misslist.Front != QUALITY.EMPTY)
         {
             frameBytesLength = new byte[messageByteLength];
             byteLengthToFrameByteArray(Fsubview.Length, frameBytesLength);
-            texClient.SendBufferSize = frameBytesLength.Length;
-            texClient.NoDelay = true;
-            NetworkStream tex_stream = texClient.GetStream();
+            tcpclient.SendBufferSize = frameBytesLength.Length;
+            tcpclient.NoDelay = true;
+            NetworkStream tex_stream = tcpclient.GetStream();
             tex_stream.Write(frameBytesLength, 0, frameBytesLength.Length);
-            texClient.SendBufferSize = 65536;
-            texClient.NoDelay = true;
-            NetworkStream tex_stream1 = texClient.GetStream();
+            tcpclient.SendBufferSize = 65536;
+            tcpclient.NoDelay = true;
+            NetworkStream tex_stream1 = tcpclient.GetStream();
             tex_stream1.Write(Fsubview, 0, Fsubview.Length);
         }
         if (misslist.Right != QUALITY.EMPTY)
         {
             frameBytesLength = new byte[messageByteLength];
             byteLengthToFrameByteArray(Rsubview.Length, frameBytesLength);
-            texClient.SendBufferSize = frameBytesLength.Length;
-            texClient.NoDelay = true;
-            NetworkStream tex_stream = texClient.GetStream();
+            tcpclient.SendBufferSize = frameBytesLength.Length;
+            tcpclient.NoDelay = true;
+            NetworkStream tex_stream = tcpclient.GetStream();
             tex_stream.Write(frameBytesLength, 0, frameBytesLength.Length);
-            texClient.SendBufferSize = 65536;
-            texClient.NoDelay = true;
-            NetworkStream tex_stream1 = texClient.GetStream();
+            tcpclient.SendBufferSize = 65536;
+            tcpclient.NoDelay = true;
+            NetworkStream tex_stream1 = tcpclient.GetStream();
             tex_stream1.Write(Rsubview, 0, Rsubview.Length);
         }
         if (misslist.Back != QUALITY.EMPTY)
         {
             frameBytesLength = new byte[messageByteLength];
             byteLengthToFrameByteArray(Bsubview.Length, frameBytesLength);
-            texClient.SendBufferSize = frameBytesLength.Length;
-            texClient.NoDelay = true;
-            NetworkStream tex_stream = texClient.GetStream();
+            tcpclient.SendBufferSize = frameBytesLength.Length;
+            tcpclient.NoDelay = true;
+            NetworkStream tex_stream = tcpclient.GetStream();
             tex_stream.Write(frameBytesLength, 0, frameBytesLength.Length);
-            texClient.SendBufferSize = 65536;
-            texClient.NoDelay = true;
-            NetworkStream tex_stream1 = texClient.GetStream();
+            tcpclient.SendBufferSize = 65536;
+            tcpclient.NoDelay = true;
+            NetworkStream tex_stream1 = tcpclient.GetStream();
             tex_stream1.Write(Bsubview, 0, Bsubview.Length);
         }
     }
@@ -401,7 +474,7 @@ public class Server_driver : MonoBehaviour
     {
         UnityEngine.Debug.LogFormat("Current position : {0},{1}", packet.pos.getX(), packet.pos.getY());
     }
-    public Loc TransP2L()
+    public void TransP2L()
     {
         myVR.classify_Location(packet.pos.getX(), packet.pos.getY());
         string region = myVR.getCurregion();
@@ -428,13 +501,11 @@ public class Server_driver : MonoBehaviour
             }
         }
         //cache.cacheinfo.cachesize;
-        sub_segment_pos seg_pos = new sub_segment_pos(start_x, end_x, start_y, end_y, seg_size);
+        seg_pos = new sub_segment_pos(start_x, end_x, start_y, end_y, seg_size);
         seg_pos.calcSeg_pos(seg_size, myVR.getCurregion().Substring(0, 1), packet.pos.getX(), packet.pos.getY(), myVR.getOrigin_X(), myVR.getOrigin_Y());
 
-        Loc loc = new Loc(myVR.getCurregion(), seg_pos, iter);
-        loc.setPos_X(Pos_x); loc.setPos_Y(Pos_y);
-
-        return loc;
+        cur_loc = new Loc(myVR.getCurregion(), seg_pos, iter);
+        cur_loc.setPos_X(Pos_x); cur_loc.setPos_Y(Pos_y);
     }
     public List<SubRange> calcSubrange(int seg_size)
     {
@@ -462,7 +533,7 @@ public class Server_driver : MonoBehaviour
         return dir;
     }
 
-    public string setdirectory(ref byte[] buffer, int pos_x, string region, int direction, QUALITY digit)
+    public string setdirectory(int pos_x, string region, int direction, QUALITY digit)
     {
         string[] ori = { "LEFT", "FRONT", "RIGHT", "BACK" };
         string dir = "";
@@ -496,11 +567,15 @@ public class Server_driver : MonoBehaviour
     {
         frameBytesLength = new byte[messageByteLength];
         byteLengthToFrameByteArray(1, frameBytesLength);
-        tex_stream.Write(frameBytesLength, 0, frameBytesLength.Length);
+        stream.Write(frameBytesLength, 0, frameBytesLength.Length);
     }
     void ReceivePacket()
     {
         int PosDataSize = readPosByteSize(messageByteLength);
+        if(PosDataSize == 100)
+        {
+            EditorApplication.isPlaying = false;
+        }
         readFrameByteArray(PosDataSize);
     }
 
@@ -508,6 +583,19 @@ public class Server_driver : MonoBehaviour
     #region Network functions
     void EstablishConn()
     {
+#if true
+        tcpserver = new TcpListener(IPAddress.Any, Port);
+        tcpserver.Start();
+        Task serverThread = new Task(() =>
+        {
+            UnityEngine.Debug.Log("Wait for Client");
+            tcpclient = tcpserver.AcceptTcpClient();
+            UnityEngine.Debug.Log("Connection is successful!!");
+            stream = tcpclient.GetStream();
+        });
+        serverThread.Start();
+        serverThread.Wait();
+#else
         #region Postional data connection
         posClient = new TcpClient();
         posClient.Connect(IPAddress.Parse(Pos_client_IP), Pos_port);
@@ -528,25 +616,10 @@ public class Server_driver : MonoBehaviour
             tex_stream = texClient.GetStream();
         });
         serverThread.Start();
-
-        UnityEngine.Debug.Log("My ip : " + GetLocalIP());
         #endregion
+#endif
 
-    }
 
-    public string GetLocalIP()
-    {
-        string localIP = "Not available, please check your network seetings!";
-        IPHostEntry host = Dns.GetHostEntry(Dns.GetHostName());
-        foreach (IPAddress ip in host.AddressList)
-        {
-            if (ip.AddressFamily == AddressFamily.InterNetwork)
-            {
-                localIP = ip.ToString();
-                break;
-            }
-        }
-        return localIP;
     }
 
     private void readClientInfo(int size)
@@ -554,9 +627,9 @@ public class Server_driver : MonoBehaviour
         bool disconnected = false;
 
         byte[] clientinfo = new byte[size];
-        posClient.ReceiveBufferSize = size;
-        posClient.NoDelay = true;
-        NetworkStream pos_stream = posClient.GetStream();
+        tcpclient.ReceiveBufferSize = size;
+        tcpclient.NoDelay = true;
+        NetworkStream pos_stream = tcpclient.GetStream();
         var total = 0;
         do
         {
@@ -578,9 +651,9 @@ public class Server_driver : MonoBehaviour
         bool disconnected = false;
 
         byte[] PosByte = new byte[size];
-        posClient.ReceiveBufferSize = size;
-        posClient.NoDelay = true;
-        NetworkStream pos_stream = posClient.GetStream();
+        tcpclient.ReceiveBufferSize = size;
+        tcpclient.NoDelay = true;
+        NetworkStream pos_stream = tcpclient.GetStream();
         var total = 0;
         do
         {
@@ -601,9 +674,9 @@ public class Server_driver : MonoBehaviour
         bool disconnected = false;
 
         byte[] PosBytesCount = new byte[size];
-        posClient.ReceiveBufferSize = size;
-        posClient.NoDelay = true;
-        NetworkStream pos_stream = posClient.GetStream();
+        tcpclient.ReceiveBufferSize = size;
+        tcpclient.NoDelay = true;
+        NetworkStream pos_stream = tcpclient.GetStream();
         var total = 0;
         do
         {
@@ -678,5 +751,8 @@ public class Server_driver : MonoBehaviour
         return obj;
     }
     #endregion
-
+    private void OnApplicationQuit()
+    {
+        UnityEngine.Debug.LogWarningFormat("Avg Buffer Write time : {0:f3}", (double)sumOfBufferWrite/(double)960);
+    }
 }
