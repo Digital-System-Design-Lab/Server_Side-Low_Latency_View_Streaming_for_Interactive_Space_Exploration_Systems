@@ -27,7 +27,7 @@ To run this system. you have to edit **Assets/Scripts/server_driver.cs** file. Y
 
 ~~~markdown
 ```c#
-	private int Texture_port = 11000;
+	private int Port = 11000;
 ```
 ~~~
 
