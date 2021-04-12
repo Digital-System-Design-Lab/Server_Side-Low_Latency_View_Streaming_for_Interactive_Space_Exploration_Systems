@@ -24,10 +24,7 @@ Data format is as follows
 ## Source code
 
 To run this system. you have to edit **Assets/Scripts/server_driver.cs** file. You should open port number for network connection. And you should edit *Texture_port*.
-
-~~~markdown
 ```c#
 	private int Port = 11000;
 ```
-~~~
 
